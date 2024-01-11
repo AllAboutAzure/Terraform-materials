@@ -1,0 +1,195 @@
+name: terraform_deploy
+
+on:
+  workflow_call:
+    inputs:
+        environment: 
+          required: true
+          type: string
+
+        environment_instance:
+          required: true
+          type: string
+
+
+        state_file_prefix: 
+          required: true
+          type: string
+
+        environment_name: 
+          required: true
+          type: string
+
+        pipeline_agent: 
+          required: true
+          type: string
+
+        variable_file_path: 
+          required: true
+          type: string
+
+        backend_file_directory: 
+          required: true
+          type: string
+
+        working_directory: 
+          required: true
+          type: string
+
+        location: 
+          required: true
+          type: string
+        
+        location_abbr: 
+          required: true
+          type: string  
+
+        object_id:
+          required: true
+          type: string
+
+    secrets:
+      client_id:
+        required: true
+      client_secret:
+        required: true
+      subscription_id:
+        required: true
+      tenant_id:
+        required: true
+
+jobs:
+  terraform-plan:
+    name: "Terraform Plan"
+    runs-on: ${{ inputs.pipeline_agent }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+        shell: bash
+    env:
+      ARM_TENANT_ID: ${{ secrets.tenant_id }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.subscription_id }}
+      ARM_CLIENT_ID: ${{ secrets.client_id }}
+      ARM_CLIENT_SECRET: ${{ secrets.client_secret }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      AZURE_AD_CLIENT_ID: ${{secrets.client_id}}
+      AZURE_AD_CLIENT_SECRET: ${{secrets.client_secret}}
+      AZURE_SUBSCRIPTION_ID: ${{secrets.subscription_id}}
+      AZURE_AD_TENANT_ID: ${{secrets.tenant_id}}
+      environment_name: ${{inputs.environment_name}}
+      TF_IN_AUTOMATION: true
+      ENV_SPECIFIC_VAR_FILE: "${{inputs.environment}}${{inputs.environment_instance}}.tfvars"
+
+    outputs:
+        tf_planstatus: ${{ steps.checkPlan.outputs.planstatus }}
+
+    steps:
+      # checkout
+      - uses: actions/checkout@v3
+      # install latest terraform version
+      - uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: latest
+          # [NOTE]: can be pined to specific version
+
+      # replace token to set the variable values
+      - uses: cschleiden/replace-tokens@v1
+        with:
+          tokenPrefix: "__#"
+          tokenSuffix: "#__"
+          files: '["**/*.tf","**/*.tfvars","**/*.backend"]'
+        # list of variables to use in replace token
+        env:
+          client_id: "${{secrets.client_id}}"
+          client_secret: "${{secrets.client_secret}}"
+          object_id: "${{inputs.object_id}}"
+          environment_abbr: "${{inputs.environment}}"
+          environment_instance: ${{ inputs.environment_instance }}
+          location_abbreviation: ${{ inputs.location_abbr }}
+          location: ${{ inputs.location }}
+          tenant_id: ${{ secrets.tenant_id }}
+          state_file_prefix: ${{inputs.state_file_prefix}}
+          subscription_id: ${{ secrets.subscription_id }}
+        
+      - name: workingDir_path
+        run: echo "path ${{ inputs.working_directory }}"
+
+      - name: copy file variable files
+        uses: canastro/copy-action@0.0.2
+        with:
+          source: ${{ inputs.variable_file_path }}/*.tfvars
+          target: ${{ inputs.working_directory }}
+
+      - name: Terraform fmt
+        id: fmt
+        run: terraform fmt -check
+
+      - name: Terraform Init
+        id: init
+        run: terraform init -backend-config="../${{ inputs.backend_file_directory }}/config.backend"
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate
+
+      - name: Terraform Plan - Resource Creation
+        id: plan
+        run: 
+          terraform plan -no-color -input=false -out=out.plan -var-file="${{env.ENV_SPECIFIC_VAR_FILE}}" -detailed-exitcode
+
+      - name: Terraform Plan Details
+        id: checkPlan
+        run: echo "planstatus="${{ steps.plan.outputs.exitcode }} >> "$GITHUB_OUTPUT"
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Publish artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ inputs.state_file_prefix}}-${{ inputs.environment }}${{ inputs.environment_instance }}-tf-plan
+          path: ${{ github.workspace }}/${{ inputs.working_directory }}/out.plan
+
+  terraform-apply:
+    if: (needs.terraform-plan.outputs.tf_planstatus == 2) && github.ref == 'refs/heads/main'
+    needs: [terraform-plan]
+    name: "Terraform Apply"
+    environment:
+      name: ${{ inputs.environment_name }}
+    env:
+      ARM_TENANT_ID: ${{ secrets.tenant_id }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.subscription_id }}
+      ARM_CLIENT_ID: ${{ secrets.client_id }}
+      ARM_CLIENT_SECRET: ${{ secrets.client_secret }}
+      #TF_LOG: debug
+    runs-on: ${{ inputs.pipeline_agent }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+        shell: bash
+    steps:
+      - uses: actions/checkout@v2
+      - uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: latest
+      - uses: cschleiden/replace-tokens@v1
+        with:
+          tokenPrefix: "__#"
+          tokenSuffix: "#__"
+          files: '["**/*.tf","**/*.tfvars","**/*.backend"]'
+
+      - name: Terraform Init
+        id: init
+        run: terraform init -backend-config="../${{ inputs.backend_file_directory }}/config.backend"
+
+      - name: Download plan
+        uses: actions/download-artifact@v2
+        with:
+          name: ${{ inputs.state_file_prefix}}-${{ inputs.environment }}${{ inputs.environment_instance }}-tf-plan
+          path: ${{ github.workspace }}/${{ inputs.working_directory }}
+
+      - name: Terraform Apply
+        run: |
+          echo ${{needs.terraform-plan.outputs.tf_planstatus}}
+          terraform apply -input=false -auto-approve out.plan

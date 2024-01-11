@@ -1,0 +1,35 @@
+name: "Stage Deployment"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "!**/readme.md"
+      - "variables/Stage/**"
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  deploy_stage_resources:
+    name: staging_env
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/01_terraform_encode.yml
+    with:
+      environment: "st"
+      environment_instance: "01"
+      state_file_prefix: "staging_state"
+      environment_name: "SUBSCRIPTION-STAGING-01"
+      pipeline_agent: "ubuntu-latest"
+      variable_file_path: "variables/Dev"
+      backend_file_directory: "variables/"
+      working_directory: "variables"
+    secrets:
+      client_id: ${{ secrets.AZURE_AD_CLIENT_ID }}
+      client_secret: ${{ secrets.AZURE_AD_CLIENT_SECRET }}
+      tenant_id: ${{ secrets.AZURE_AD_TENANT_ID }}
+      subscription_id: ${{ secrets.SUBSCRIPTION-STAGE-01 }}

@@ -1,0 +1,88 @@
+#  [Re-usable workflow] this will invoke the child template
+name: terraform_encode
+
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    # this is to make sure it called by parent workflow
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        description: "name of the environment"
+
+      environment_instance:
+        type: string
+        description: "name of the environment instance"
+        default: "01"
+
+      state_file_prefix:
+        type: string
+        description: "name of the state file prefix"
+
+      environment_name:
+        type: string
+        description: "name of the environment given in the azure subscription"
+
+      pipeline_agent:
+        type: string
+        description: "name of the github pipeline agent"
+
+      variable_file_path:
+        type: string
+        description: "name of the variable file path"
+
+      backend_file_directory:
+        type: string
+        description: "name of the backend file directory"
+
+      working_directory:
+        type: string
+        description: "name of the working directory"
+
+      location:
+        type: string
+        description: "name of the deployment location"
+        default: "eastus"
+
+      location_abbr:
+        type: string
+        description: "location abbreviations"
+        default: "eus"
+
+      object_id:
+        type: string
+        description: "Service Principal Object ID"
+        default: "209834iueroiuew12" #sample object id is populated.
+
+    secrets:
+      client_id:
+        required: true
+      client_secret:
+        required: true
+      subscription_id:
+        required: true
+      tenant_id:
+        required: true
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  template:
+    name: terraform deploy
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/02_terraform_deploy.yml
+    with:
+      environment: ${{inputs.environment}}
+      environment_instance: ${{inputs.environment_instance}}
+      state_file_prefix: ${{inputs.state_file_prefix}}
+      environment_name: ${{inputs.environment_name}}
+      pipeline_agent: ${{inputs.pipeline_agent}}
+      variable_file_path: ${{inputs.variable_file_path}}
+      backend_file_directory: ${{inputs.backend_file_directory}}
+      working_directory: ${{inputs.working_directory}}
+      location: ${{ inputs.location }}
+      location_abbr: ${{ inputs.location_abbr }}
+      object_id: ${{ inputs.object_id }}
+    secrets: inherit
