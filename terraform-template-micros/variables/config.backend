@@ -1,5 +1,0 @@
- resource_group_name   = "rg-staging-01"
- storage_account_name  = "stgstatefiles"
- container_name        = "tfstatefile"
- key                   = "shared-__#environment_abbr#____#environment_instance#__.tfstate"
- subscription_id       =  "<<subscription_id>>"
